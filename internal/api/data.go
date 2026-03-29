@@ -447,6 +447,141 @@ func ReRunJob(repo string, jobId string) error {
 	return err
 }
 
+// REST API response for GET /repos/{owner}/{repo}/actions/runs/{run_id}
+type ActionsRunResponse struct {
+	Id           int       `json:"id"`
+	Name         string    `json:"name"`
+	HeadBranch   string    `json:"head_branch"`
+	HeadSha      string    `json:"head_sha"`
+	Status       string    `json:"status"`
+	Conclusion   string    `json:"conclusion"`
+	HtmlUrl      string    `json:"html_url"`
+	Event        string    `json:"event"`
+	RunNumber    int       `json:"run_number"`
+	RunAttempt   int       `json:"run_attempt"`
+	WorkflowId   int       `json:"workflow_id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	RunStartedAt time.Time `json:"run_started_at"`
+	DisplayTitle string    `json:"display_title"`
+	Repository   struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+}
+
+// REST API response for GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
+type ActionsRunJobsResponse struct {
+	TotalCount int             `json:"total_count"`
+	Jobs       []ActionsRunJob `json:"jobs"`
+}
+
+type ActionsRunJob struct {
+	Id          int        `json:"id"`
+	RunId       int        `json:"run_id"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	Conclusion  string     `json:"conclusion"`
+	HtmlUrl     string     `json:"html_url"`
+	StartedAt   time.Time  `json:"started_at"`
+	CompletedAt time.Time  `json:"completed_at"`
+	RunAttempt  int        `json:"run_attempt"`
+	Steps       []httpStep `json:"steps"`
+}
+
+func FetchWorkflowRunByID(repo string, runID string) (ActionsRunResponse, error) {
+	res := ActionsRunResponse{}
+	c, err := getHTTPClient()
+	if err != nil {
+		return res, err
+	}
+
+	runUrl, err := url.Parse(
+		fmt.Sprintf("https://api.github.com/repos/%s/actions/runs/%s", repo, runID),
+	)
+	if err != nil {
+		return res, err
+	}
+
+	log.Debug("fetching workflow run by ID", "url", runUrl)
+	startTime := time.Now()
+	resp, err := c.Get(runUrl.String())
+	if err != nil {
+		return res, err
+	}
+	log.Debug("FetchWorkflowRunByID request completed", "duration", time.Since(startTime))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return res, fmt.Errorf(
+			"failed to fetch workflow run %s: %s %s",
+			runID,
+			resp.Status,
+			string(body),
+		)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return res, err
+	}
+
+	err = json.Unmarshal(body, &res)
+	if err != nil {
+		log.Error("error unmarshaling workflow run", "err", err)
+		return res, err
+	}
+
+	return res, nil
+}
+
+func FetchWorkflowRunJobs(repo string, runID string) (ActionsRunJobsResponse, error) {
+	res := ActionsRunJobsResponse{}
+	c, err := getHTTPClient()
+	if err != nil {
+		return res, err
+	}
+
+	jobsUrl, err := url.Parse(
+		fmt.Sprintf("https://api.github.com/repos/%s/actions/runs/%s/jobs", repo, runID),
+	)
+	if err != nil {
+		return res, err
+	}
+
+	log.Debug("fetching workflow run jobs", "url", jobsUrl)
+	startTime := time.Now()
+	resp, err := c.Get(jobsUrl.String())
+	if err != nil {
+		return res, err
+	}
+	log.Debug("FetchWorkflowRunJobs request completed", "duration", time.Since(startTime))
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return res, fmt.Errorf(
+			"failed to fetch workflow run jobs for run %s: %s %s",
+			runID,
+			resp.Status,
+			string(body),
+		)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return res, err
+	}
+
+	err = json.Unmarshal(body, &res)
+	if err != nil {
+		log.Error("error unmarshaling workflow run jobs", "err", err)
+		return res, err
+	}
+
+	return res, nil
+}
+
 func ReRunRun(repo string, runId string) error {
 	client, err := gh.DefaultRESTClient()
 	if err != nil {
