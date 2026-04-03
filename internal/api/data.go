@@ -473,7 +473,7 @@ type WorkflowRunResponse struct {
 // REST API response for GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
 // https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run
 type WorkflowRunJobsResponse struct {
-	TotalCount int                `json:"total_count"`
+	TotalCount int              `json:"total_count"`
 	Jobs       []WorkflowRunJob `json:"jobs"`
 }
 
