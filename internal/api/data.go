@@ -448,7 +448,8 @@ func ReRunJob(repo string, jobId string) error {
 }
 
 // REST API response for GET /repos/{owner}/{repo}/actions/runs/{run_id}
-type ActionsRunResponse struct {
+// https://docs.github.com/en/rest/actions/workflow-runs#get-a-workflow-run
+type WorkflowRunResponse struct {
 	Id           int       `json:"id"`
 	Name         string    `json:"name"`
 	HeadBranch   string    `json:"head_branch"`
@@ -470,12 +471,13 @@ type ActionsRunResponse struct {
 }
 
 // REST API response for GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs
-type ActionsRunJobsResponse struct {
-	TotalCount int             `json:"total_count"`
-	Jobs       []ActionsRunJob `json:"jobs"`
+// https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run
+type WorkflowRunJobsResponse struct {
+	TotalCount int                `json:"total_count"`
+	Jobs       []WorkflowRunJob `json:"jobs"`
 }
 
-type ActionsRunJob struct {
+type WorkflowRunJob struct {
 	Id          int        `json:"id"`
 	RunId       int        `json:"run_id"`
 	Name        string     `json:"name"`
@@ -488,8 +490,8 @@ type ActionsRunJob struct {
 	Steps       []httpStep `json:"steps"`
 }
 
-func FetchWorkflowRunByID(repo string, runID string) (ActionsRunResponse, error) {
-	res := ActionsRunResponse{}
+func FetchWorkflowRunByID(repo string, runID string) (WorkflowRunResponse, error) {
+	res := WorkflowRunResponse{}
 	c, err := getHTTPClient()
 	if err != nil {
 		return res, err
@@ -535,8 +537,8 @@ func FetchWorkflowRunByID(repo string, runID string) (ActionsRunResponse, error)
 	return res, nil
 }
 
-func FetchWorkflowRunJobs(repo string, runID string) (ActionsRunJobsResponse, error) {
-	res := ActionsRunJobsResponse{}
+func FetchWorkflowRunJobs(repo string, runID string) (WorkflowRunJobsResponse, error) {
+	res := WorkflowRunJobsResponse{}
 	c, err := getHTTPClient()
 	if err != nil {
 		return res, err
