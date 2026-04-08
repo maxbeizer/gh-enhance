@@ -286,16 +286,156 @@ func makeOpenUrlCmd(url string) tea.Cmd {
 	}
 }
 
-func (m *model) makeInitCmd() tea.Cmd {
-	return tea.Batch(
+func (m *model) startSpinners() []tea.Cmd {
+	return []tea.Cmd{
 		m.checksList.StartSpinner(),
 		m.runsList.StartSpinner(),
 		m.logsSpinner.Tick,
 		m.jobsList.StartSpinner(),
+	}
+}
+
+func (m *model) makeInitCmd() tea.Cmd {
+	cmds := m.startSpinners()
+	cmds = append(cmds,
 		m.makeFetchPRCmd(),
 		m.makeInitialGetPRChecksCmd(m.prNumber),
 		m.startFetchingPRChecksWithInterval(),
 	)
+	return tea.Batch(cmds...)
+}
+
+// Run mode: fetch the workflow run and its jobs directly via REST API.
+func (m *model) makeRunModeInitCmd() tea.Cmd {
+	cmds := m.startSpinners()
+	cmds = append(cmds,
+		m.makeFetchRunCmd(),
+		m.startFetchingRunWithInterval(),
+	)
+	return tea.Batch(cmds...)
+}
+
+type runModeFetchedMsg struct {
+	runs []data.WorkflowRun
+	err  error
+}
+
+func (m *model) makeFetchRunCmd() tea.Cmd {
+	return func() tea.Msg {
+		return m.fetchRun()
+	}
+}
+
+func (m *model) fetchRun() tea.Msg {
+	runResp, err := api.FetchWorkflowRunByID(m.repo, m.runID)
+	if err != nil {
+		log.Error("error fetching workflow run", "err", err)
+		return runModeFetchedMsg{err: err}
+	}
+
+	jobsResp, err := api.FetchWorkflowRunJobs(m.repo, m.runID)
+	if err != nil {
+		log.Error("error fetching workflow run jobs", "err", err)
+		return runModeFetchedMsg{err: err}
+	}
+
+	run := convertRunResponseToWorkflowRun(runResp, jobsResp)
+	return runModeFetchedMsg{runs: []data.WorkflowRun{run}}
+}
+
+func (m *model) startFetchingRunWithInterval() tea.Cmd {
+	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
+		return startRunIntervalFetching{}
+	})
+}
+
+type startRunIntervalFetching struct{}
+
+func (m *model) fetchRunWithInterval() tea.Cmd {
+	return tea.Batch(
+		m.makeFetchRunCmd(),
+		tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
+			if !m.isRunModeInProgress() {
+				log.Info("run has concluded - not refetching anymore")
+				return nil
+			}
+
+			if m.rateLimit.Remaining == 0 && time.Now().Before(m.rateLimit.ResetAt) {
+				log.Warn("rate limit reached, waiting", "m.rateLimit", m.rateLimit)
+				return nil
+			}
+
+			return runModeIntervalTickMsg{msg: m.fetchRun()}
+		}),
+	)
+}
+
+type runModeIntervalTickMsg struct {
+	msg tea.Msg
+}
+
+func convertRunResponseToWorkflowRun(
+	run api.WorkflowRunResponse,
+	jobsResp api.WorkflowRunJobsResponse,
+) data.WorkflowRun {
+	jobs := make([]data.WorkflowJob, 0, len(jobsResp.Jobs))
+	for _, j := range jobsResp.Jobs {
+		conclusion := api.Conclusion(strings.ToUpper(j.Conclusion))
+		status := api.Status(strings.ToUpper(j.Status))
+
+		steps := make([]api.Step, 0, len(j.Steps))
+		for _, s := range j.Steps {
+			steps = append(steps, api.Step{
+				Conclusion:  api.Conclusion(strings.ToUpper(s.Conclusion)),
+				Name:        s.Name,
+				Number:      s.Number,
+				StartedAt:   s.StartedAt,
+				CompletedAt: s.CompletedAt,
+				Status:      api.Status(strings.ToUpper(s.Status)),
+			})
+		}
+
+		jobs = append(jobs, data.WorkflowJob{
+			Id:          fmt.Sprintf("%d", j.Id),
+			State:       status,
+			Conclusion:  conclusion,
+			Name:        j.Name,
+			Workflow:    run.Name,
+			Event:       run.Event,
+			Logs:        []data.LogsWithTime{},
+			Link:        j.HtmlUrl,
+			Steps:       steps,
+			StartedAt:   j.StartedAt,
+			CompletedAt: j.CompletedAt,
+			Bucket:      data.GetConclusionBucket(conclusion),
+			Kind:        data.JobKindGithubActions,
+			RunNumber:   run.RunNumber,
+		})
+	}
+	data.SortJobs(jobs)
+
+	runConclusion := api.Conclusion(strings.ToUpper(run.Conclusion))
+
+	var prNumber int
+	if len(run.PullRequests) > 0 {
+		prNumber = run.PullRequests[0].Number
+	}
+
+	wfRun := data.WorkflowRun{
+		Id:           fmt.Sprintf("%d", run.Id),
+		Name:         run.Name,
+		DisplayTitle: run.DisplayTitle,
+		Link:         run.HtmlUrl,
+		Workflow:     run.Name,
+		Event:        run.Event,
+		Jobs:         jobs,
+		Bucket:       data.GetConclusionBucket(runConclusion),
+		StartedAt:    run.RunStartedAt,
+		RunNumber:    run.RunNumber,
+		PRNumber:     prNumber,
+	}
+
+	return wfRun
 }
 
 func workflowName(cr api.CheckRun) string {
